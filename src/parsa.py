@@ -48,7 +48,7 @@ class ExpressionOperation(Expression):
     right: ExpressionValue
 
     def __repr__(self) -> str:
-        return f"[{left}]{operator}[{right}]"
+        return f"[{self.left}]{self.operator}[{self.right}]"
 
 
 def match_paren_left_to_right(tokens: list[Token], anchor_index: int) -> int:
