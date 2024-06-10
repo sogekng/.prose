@@ -55,7 +55,7 @@ class VariableBank:
 
     def get(self, name: str) -> Variable:
         if not self.exists(name):
-            raise Exception(f"No variable named '{token.value}' was declared")
+            raise Exception(f"No variable named '{name}' was declared")
 
         for i in range(len(self.scopes) - 1, -1, -1):
             scope = self.scopes[i]

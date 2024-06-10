@@ -1,13 +1,15 @@
 from dataclasses import dataclass
 import sys
+import re
 
-from util.token import Token, TokenType, STRUCTURE_TOKENS, LITERAL_TOKENS, INVALID_EXPRESSION_TOKENS, OPERATOR_TOKENS, BOOLEAN_OPERATOR_TOKENS, NUMERIC_OPERATOR_TOKENS
+from render_method import FunctionBank
+from util.token import Token, TokenType, STRUCTURE_TOKENS, LITERAL_TOKENS, INVALID_EXPRESSION_TOKENS, OPERATOR_TOKENS, \
+    BOOLEAN_OPERATOR_TOKENS, NUMERIC_OPERATOR_TOKENS
 from render import VariableBank, VariableType, Variable, NUMERIC_TYPES
 
 # NOTE(volatus): these exist because Treesitter is stupid
 OPEN_BRACKET = "{"
 CLOSE_BRACKET = "}"
-
 
 PRECEDENCE_TABLE = {
     TokenType.OR: 1,
@@ -171,6 +173,16 @@ def validate_expression(tokens: list, varbank: VariableBank) -> None:
                 raise Exception(f"Variable declared but unvalued: '{token.value}'")
 
 
+def validate_expression_method(tokens: list, function_bank: FunctionBank, function_name: str) -> None:
+    for token in tokens:
+        if token.token_type in INVALID_EXPRESSION_TOKENS:
+            raise Exception(f"Invalid token found in expression: '{token}'")
+
+        if token.token_type == TokenType.IDENTIFIER:
+            if not function_bank.exists(token.value):
+                raise Exception(f"No variable named '{token.value}' was declared")
+
+
 def lang_type_to_java_type(lang_type: str) -> str:
     if lang_type == VariableType.STRING:
         return "String"
@@ -186,6 +198,27 @@ def lang_type_to_java_type(lang_type: str) -> str:
 
 def render_expression(tokens: list) -> str:
     return ' '.join([token.value for token in tokens])
+
+
+def render_parameters(parameters, type_mapping):
+    param_tuples = [(parameters[i], parameters[i + 1]) for i in range(0, len(parameters), 2)]
+    parameter_string = ", ".join(f"{type_mapping.get(type_, type_)} {name}" for type_, name in param_tuples)
+
+    return parameter_string
+
+
+def replace_variables(expression: str, values: list) -> str:
+    variables = re.findall(r'\b[a-zA-Z]\b', expression)
+    concatenated_values = ''.join(values).replace(' ', '')
+    value_list = concatenated_values.split(',')
+
+    if len(variables) != len(value_list):
+        raise ValueError("O número de variáveis e valores não correspondem.")
+
+    for var, val in zip(variables, value_list):
+        expression = re.sub(rf'\b{var}\b', val, expression)
+
+    return expression
 
 
 @dataclass
@@ -233,7 +266,7 @@ class Statement:
     def validate_syntax(self) -> bool:
         return True
 
-    def render(self, varbank: VariableBank) -> str:
+    def render(self, varbank: VariableBank, function_bank: FunctionBank, function_name: str) -> str:
         return ""
 
 
@@ -255,7 +288,7 @@ class CreateStatement(Statement):
                 and self.tokens[3].token_type == TokenType.IDENTIFIER
         )
 
-    def render(self, varbank: VariableBank) -> str:
+    def render(self, varbank: VariableBank, function_bank: FunctionBank, function_name: str) -> str:
         var_type_str: str = self.tokens[1].value
         is_constant: bool = self.tokens[2].value == 'constant'
         var_name: str = self.tokens[3].value
@@ -303,12 +336,12 @@ class WriteStatement(Statement):
                 len(self.tokens) >= 2
                 and self.tokens[0].token_type == TokenType.WRITE
                 and (
-                    self.tokens[1].token_type == TokenType.STRING
-                    or self.tokens[1].token_type == TokenType.IDENTIFIER
+                        self.tokens[1].token_type == TokenType.STRING
+                        or self.tokens[1].token_type == TokenType.IDENTIFIER
                 )
         )
 
-    def render(self, varbank: VariableBank) -> str:
+    def render(self, varbank: VariableBank, function_bank: FunctionBank, function_name: str) -> str:
         expression_tokens = self.tokens[1:]
         validate_expression(expression_tokens, varbank)
         return f"System.out.printf({', '.join([token.value for token in expression_tokens])});"
@@ -323,15 +356,35 @@ class SetStatement(Statement):
                 and self.tokens[2].token_type == TokenType.TO
         )
 
-    def render(self, varbank: VariableBank) -> str:
+    def render(self, varbank: VariableBank, function_bank: FunctionBank, function_name: str) -> str:
         expression_tokens = self.tokens[3:]
-        validate_expression(expression_tokens, varbank)
-
         var_name = self.tokens[1].value
 
-        varbank.redefine(var_name, expression_tokens)
+        if (self.tokens[3].token_type == TokenType.IDENTIFIER
+                and self.tokens[4].token_type == TokenType.LPAREN
+                and self.tokens[-1].token_type == TokenType.RPAREN):
+            validate_expression_method(expression_tokens, function_bank, self.tokens[3].value)
 
-        return f"{var_name} = {render_expression(expression_tokens)};"
+            values = []
+
+            for item in expression_tokens[2:-1]:
+                values.append(item.value)
+
+            expression = function_bank.get_function_return_expression(self.tokens[3].value)
+
+            expression = replace_variables(expression, values)
+
+            varbank.redefine(var_name, eval(expression))
+
+            expression = render_expression(expression_tokens)
+
+            return f"{var_name} = {expression};"
+        else:
+            validate_expression(expression_tokens, varbank)
+
+            varbank.redefine(var_name, expression_tokens)
+
+            return f"{var_name} = {render_expression(expression_tokens)};"
 
 
 class ReadStatement(Statement):
@@ -342,7 +395,7 @@ class ReadStatement(Statement):
                 self.tokens[1].token_type == TokenType.IDENTIFIER
         )
 
-    def render(self, varbank: VariableBank) -> str:
+    def render(self, varbank: VariableBank, function_bank: FunctionBank, function_name: str) -> str:
         var_name: str = self.tokens[1].value
 
         variable: Variable = varbank.get(var_name)
@@ -362,6 +415,60 @@ class ReadStatement(Statement):
         return f"{var_name} = scanner.{method}();"
 
 
+class ReturnStatement(Statement):
+    def validate_syntax(self) -> bool:
+        return (
+                len(self.tokens) >= 2
+                and self.tokens[0].token_type == TokenType.RETURN
+        )
+
+    def render(self, varbank: VariableBank, function_bank: FunctionBank, function_name: str) -> str:
+        expression_tokens = self.tokens[1:]
+        # validate_expression_method(expression_tokens, function_bank.get_current_function().variable_bank, function_name)
+
+        expression_rendered = render_expression(expression_tokens)
+        function_bank.set_function_return_expression(function_name, expression_rendered)
+
+        return f"return {expression_rendered};"
+
+
+class CallStatement(Statement):
+    def validate_syntax(self) -> bool:
+        return (
+            len(self.tokens) >= 3
+            and self.tokens[0].token_type == TokenType.IDENTIFIER
+            and self.tokens[1].token_type == TokenType.LPAREN
+            and self.tokens[-1].token_type == TokenType.RPAREN
+        )
+
+    def render(self, varbank: VariableBank, function_bank: FunctionBank, function_name: str) -> str:
+        function_name_token = self.tokens[0].value
+        argument_tokens = self.tokens[2:-1]
+
+        if not function_bank.exists(function_name_token):
+            raise Exception(f"Function {function_name_token} is not defined.")
+
+        function = function_bank.get_function(function_name_token)
+
+        arguments = []
+        current_arg = []
+        for token in argument_tokens:
+            if token.token_type == TokenType.COMMA:
+                arguments.append(render_expression(current_arg))
+                current_arg = []
+            else:
+                current_arg.append(token)
+        if current_arg:
+            arguments.append(render_expression(current_arg))
+
+        if len(arguments) != len(function.parameters):
+            raise Exception(
+                f"Function {function_name_token} expects {len(function.parameters)} arguments, but got {len(arguments)}.")
+
+        rendered_arguments = ", ".join(arguments)
+        return f"{function_name_token}({rendered_arguments});"
+
+
 @dataclass
 class Structure:
     branches: list[Branch]
@@ -369,19 +476,20 @@ class Structure:
     def __repr__(self) -> str:
         return f"STRUCT::[{', '.join([repr(branch) for branch in self.branches])}]"
 
-    def render(self, varbank: VariableBank) -> list[str]:
+    def render(self, varbank: VariableBank, function_bank: FunctionBank, function_name: str) -> list[str]:
         return []
 
-    def render_branch(self, varbank: VariableBank, i: int) -> list[str]:
+    def render_branch(self, varbank: VariableBank, i: int, function_bank: FunctionBank, function_name: str) -> list[str]:
         lines = []
 
         varbank.start_scope()
 
         for item in self.branches[i].content_tokens:
+
             if isinstance(item, Statement):
-                lines.append(item.render(varbank))
+                lines.append(item.render(varbank, function_bank, function_name))
             elif isinstance(item, Structure):
-                lines.extend(item.render(varbank))
+                lines.extend(item.render(varbank, function_bank, function_name))
             else:
                 raise Exception(f"Unexpected branch item found {item}")
 
@@ -391,11 +499,11 @@ class Structure:
 
 
 class IfStructure(Structure):
-    def render(self, varbank: VariableBank) -> list[str]:
+    def render(self, varbank: VariableBank, function_bank: FunctionBank, function_name: str) -> list[str]:
         lines = []
 
         lines.append(f"if ({render_expression(self.branches[0].condition_tokens)}) {OPEN_BRACKET}")
-        lines.extend(self.render_branch(varbank, 0))
+        lines.extend(self.render_branch(varbank, 0, function_bank, function_name))
 
         for i in range(1, len(self.branches)):
             branch = self.branches[i]
@@ -405,7 +513,7 @@ class IfStructure(Structure):
             else:
                 lines.append(f"{CLOSE_BRACKET} else if ({render_expression(branch.condition_tokens)}) {OPEN_BRACKET}")
 
-            lines.extend(self.render_branch(varbank, i))
+            lines.extend(self.render_branch(varbank, i, function_bank, function_name))
 
         lines.append(CLOSE_BRACKET)
 
@@ -413,25 +521,75 @@ class IfStructure(Structure):
 
 
 class WhileStructure(Structure):
-    def render(self, varbank: VariableBank) -> list[str]:
+    def render(self, varbank: VariableBank, function_bank: FunctionBank, function_name: str) -> list[str]:
         lines = []
 
         lines.append(f"while ({render_expression(self.branches[0].condition_tokens)}) {OPEN_BRACKET}")
-        lines.extend(self.render_branch(varbank, 0))
+        lines.extend(self.render_branch(varbank, 0, function_bank, function_name))
         lines.append(CLOSE_BRACKET)
 
         return lines
 
 
 class DoWhileStructure(Structure):
-    def render(self, varbank: VariableBank) -> list[str]:
+    def render(self, varbank: VariableBank, function_bank: FunctionBank, function_name: str) -> list[str]:
         lines = []
 
         lines.append(f"do {OPEN_BRACKET}")
-        lines.extend(self.render_branch(varbank, 0))
+        lines.extend(self.render_branch(varbank, 0, function_bank, function_name))
         lines.append(f"{CLOSE_BRACKET} while ({render_expression(self.branches[0].condition_tokens)});")
 
         return lines
+
+
+class FunctionStructure(Structure):
+    def render(self, varbank: VariableBank, function_bank: FunctionBank, function_name: str) -> list[str]:
+        lines = []
+
+        function_identifier = render_expression(self.branches[0].condition_tokens)
+        function_identifier = function_identifier.split()
+        function_type = function_identifier[0]
+        function_name = function_identifier[1]
+        parameters = [item for item in function_identifier[3:-1] if item != ',']
+
+        grouped_parameters = group_parameters(parameters)
+        param_definitions = []
+
+        function_bank.create_function(function_name, function_type, grouped_parameters)
+
+        type_mapping = {
+            'integer': 'int',
+            'string': 'String',
+            'boolean': 'bool',
+            'rational': 'float'
+        }
+
+        for item in grouped_parameters:
+            var_type = item[0]
+            function_bank.add_variable(function_name, item[1], False, var_type, 0)
+            param_definitions.append(f"{type_mapping.get(var_type)} {item[1]}")
+
+        function_type = type_mapping.get(function_type)
+
+        rendered_parameters = ", ".join(param_definitions)
+
+        lines.append(f"public static {function_type} {function_name}({rendered_parameters}) {OPEN_BRACKET}")
+
+        lines.extend(self.render_branch(varbank, 0, function_bank, function_name))
+
+        lines.append(CLOSE_BRACKET)
+
+        return lines
+
+
+def group_parameters(param_list):
+    grouped_params = []
+
+    for i in range(0, len(param_list), 2):
+        param_type = param_list[i]
+        param_name = param_list[i + 1]
+        grouped_params.append((param_type, param_name))
+    return grouped_params
 
 
 def find_next_token(tokens, token_type, offset):
@@ -462,7 +620,19 @@ def group_structures(tokens):
     while i < len(tokens):
         token = tokens[i]
 
-        if token.token_type == TokenType.DO:
+        if token.token_type == TokenType.FUNCTION:
+            stack.append(StructureGroup(
+                structure_type=token.token_type,
+                branches=[Branch(condition_tokens=[], content_tokens=[])]
+            ))
+
+            i += 1
+
+            while tokens[i].token_type != TokenType.DO:
+                stack[-1].branches[0].condition_tokens.append(tokens[i])
+                i += 1
+
+        elif token.token_type == TokenType.DO:
             stack.append(StructureGroup(
                 structure_type=token.token_type,
                 branches=[Branch(condition_tokens=[], content_tokens=[])]
@@ -569,6 +739,11 @@ def build_statement(group: StatementGroup) -> Statement:
         statement = ReadStatement(group.tokens)
     elif group.tokens[0].token_type == TokenType.SET:
         statement = SetStatement(group.tokens)
+    elif group.tokens[0].token_type == TokenType.RETURN:
+        statement = ReturnStatement(group.tokens)
+    elif group.tokens[0].token_type == TokenType.IDENTIFIER:
+        if group.tokens[1].token_type == TokenType.LPAREN and group.tokens[-1].token_type == TokenType.RPAREN:
+            statement = CallStatement(group.tokens)
     else:
         raise Exception(f"Unexpected token type '{group.tokens[0].token_type}'")
 
@@ -578,7 +753,7 @@ def build_statement(group: StatementGroup) -> Statement:
     return statement
 
 
-def synthesize_statements(items): # -> list[Structure | Statement]
+def synthesize_statements(items):  # -> list[Structure | Statement]
     elements = []
 
     i = 0
@@ -595,6 +770,8 @@ def synthesize_statements(items): # -> list[Structure | Statement]
                 structure = DoWhileStructure(branches=[])
             elif item.structure_type == TokenType.WHILE:
                 structure = WhileStructure(branches=[])
+            elif item.structure_type == TokenType.FUNCTION:
+                structure = FunctionStructure(branches=[])
 
             for branch in item.branches:
                 structure.branches.append(Branch(

@@ -29,6 +29,7 @@ token_regex = {
     TokenType.LPAREN: re.compile(r'\('),
     TokenType.RPAREN: re.compile(r'\)'),
     TokenType.SEMICOLON: re.compile(r';'),
+    TokenType.COMMA: re.compile(r','),
 
     # Types
     TokenType.TYPE: re.compile(r'\b(string)|(integer)|(rational)|(boolean)\b'),
@@ -47,6 +48,8 @@ token_regex = {
     TokenType.WRITE: re.compile(r'\bwrite\b'),
     TokenType.END: re.compile(r'\bend\b'),
     TokenType.THEN: re.compile(r'\bthen\b'),
+    TokenType.RETURN: re.compile(r'\breturn\b'),
+    TokenType.FUNCTION: re.compile(r'\bfunction\b'),
 
     TokenType.IDENTIFIER: re.compile(r'([a-zA-Z_][a-zA-Z0-9_]*)'),
 }

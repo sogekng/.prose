@@ -1,6 +1,7 @@
 from lexer import Lexer
 from parsa import *
 from render import VariableBank
+from render_method import FunctionBank
 import pprint
 import sys
 from os import path
@@ -36,68 +37,66 @@ def main():
     output_path = path.join(path_dirname, f"{program_name}.java")
 
     try:
-        code: str
-
-        try:
-            with open(file_path, 'r') as file:
-                code = file.read()
-        except FileNotFoundError:
-            print(f"O arquivo {file_path} não foi encontrado.")
-            return
+        with open(file_path, 'r') as file:
+            code = file.read()
 
         lexer = Lexer()
         tokens = lexer.tokenize(code)
 
-        # print("TOKENS::::")
-        # pprint.pp(tokens)
         grouped_tokens = group_statements(group_structures(tokens))
-        # print("GROUPED TOKENS::::")
-        # pprint.pp(grouped_tokens)
         syntax_tree = synthesize_statements(grouped_tokens)
-        # print("SYNTAX TREE::::")
-        # pprint.pp(syntax_tree)
+
+        # print(syntax_tree)
 
         print("Output:", output_path)
 
         varbank = VariableBank()
-        lines = []
+        function_bank = FunctionBank()
+        main_lines = []
+        function_lines = []
 
         for syntax_item in syntax_tree:
             if isinstance(syntax_item, Statement):
-                lines.append(syntax_item.render(varbank))
+                main_lines.append(syntax_item.render(varbank, function_bank, ""))
             elif isinstance(syntax_item, Structure):
-                lines.extend(syntax_item.render(varbank))
+                if isinstance(syntax_item, FunctionStructure):
+                    function_lines.extend(syntax_item.render(varbank, function_bank, ""))
+                else:
+                    main_lines.extend(syntax_item.render(varbank, function_bank, ""))
             else:
                 raise Exception(f"Unexpected syntax item '{syntax_item}'")
 
-        java_code = "\n".join(lines)
+        java_main_code = "\n".join(main_lines)
+        java_functions_code = "\n".join(function_lines)
 
-        # print("Variaveis:\n")
-        # pprint.pp(varbank.scopes)
-        # print()
+        print("Funções:\n")
+        pprint.pp(function_bank.functions)
+        print()
+        for item in function_bank.functions:
+            print(f"Variaveis na função: {item}\n")
+            pprint.pp(function_bank.functions[item].variable_bank.scopes)
+            print()
+        print()
+        print("Variaveis globais:\n")
+        pprint.pp(varbank.scopes)
+        print()
 
         with open(output_path, 'w') as output_file:
-            # Preamble
             output_file.write(f"import java.util.Scanner;\n\n")
             output_file.write(f"public class {program_name} {{\n")
+            output_file.write(f"{java_functions_code}\n")
             output_file.write("public static void main(String[] args) {\n")
             output_file.write("Scanner scanner = new Scanner(System.in);\n")
-
-            # Código gerado dinamicamente
-            output_file.write(java_code)
-
-            # Epilogue
+            output_file.write(java_main_code)
             output_file.write("\nscanner.close();\n")
-            output_file.write("}}\n")
+            output_file.write("}}")
 
         compile_command = ["javac", output_path]
         subprocess.run(compile_command, check=True)
         print(f"Arquivo {output_path} compilado com sucesso.")
 
-        # Executar o arquivo Java compilado
         execute_command = ["java", "-cp", path_dirname, program_name]
         result = subprocess.run(execute_command, check=True, capture_output=True, text=True)
-
         print("Saída da execução do programa Java:\n")
         print(result.stdout)
     except subprocess.CalledProcessError as e:

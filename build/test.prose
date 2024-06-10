@@ -1,41 +1,16 @@
-create integer variable x 25;
-create integer constant Y 35;
+create integer variable resultado;
+create integer variable result;
 
-create integer variable z;
-set z to x + Y;
-
-write "z = %d\n" z;  # z = 60
-
-# Erro: não é possível alterar uma `constant`
-# set Y to 5;
-
-create string constant WELCOME "Welcome to my program\n";
-
-write WELCOME;  # Welcome to my program
-
-create integer variable j;
-read j;  # Lê um inteiro para dentro de `j`
-
-create integer variable i 0;
-
-# i = 0
-# i = 1
-# ...
-# i = n - 1
-while i < j do
-    write "i = %d\n" i;
-    set i to i + 1;
+function integer somar(integer x, integer y) do
+    return x + y;
 end
 
-# i reached its maximum
-if i == j - 1 then
-    write "i reached its maximum\n";
-elif i > 0 then
-    write "i did not progress\n";
-else
-    write "i decreased somehow\n";
+function integer multi(integer x, integer y) do
+    return x * y;
 end
 
-do
-    write "Testing!\n";
-while false end
+
+set resultado to multi(20, 20);
+set result to multi(40, 100);
+
+write "%d - %d" resultado result;

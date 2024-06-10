@@ -31,7 +31,6 @@ class TokenType(Enum):
     RPAREN = auto()
     SEMICOLON = auto()
     COMMA = auto()
-    COLON = auto()
 
     # Types
     TYPE = auto()
@@ -50,6 +49,8 @@ class TokenType(Enum):
     WRITE = auto()
     END = auto()
     THEN = auto()
+    RETURN = auto()
+    FUNCTION = auto()
 
     IDENTIFIER = auto()
 
@@ -59,7 +60,8 @@ STRUCTURE_TOKENS = [
     TokenType.ELIF,
     TokenType.ELSE,
     TokenType.DO,
-    TokenType.WHILE
+    TokenType.WHILE,
+    TokenType.FUNCTION
 ]
 
 OPERATOR_TOKENS = [
@@ -117,6 +119,8 @@ INVALID_EXPRESSION_TOKENS = [
     TokenType.WRITE,
     TokenType.END,
     TokenType.THEN,
+    TokenType.RETURN,
+    TokenType.FUNCTION
 ]
 
 

@@ -1,0 +1,10 @@
+create integer variable resultado;
+
+function integer somar(integer x, integer y) do
+    return x + y;
+end
+
+
+set resultado to somar(10, 20);
+
+write resultado;
