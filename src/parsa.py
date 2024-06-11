@@ -208,16 +208,14 @@ def render_parameters(parameters, type_mapping):
 
 
 def replace_variables(expression: str, values: list) -> str:
-    variables = re.findall(r'\b[a-zA-Z]\b', expression)
+    variables = re.findall(r'\b[a-zA-Z_][a-zA-Z0-9_]*\b', expression)
     concatenated_values = ''.join(values).replace(' ', '')
     value_list = concatenated_values.split(',')
-
-    if len(variables) != len(value_list):
-        raise ValueError("O número de variáveis e valores não correspondem.")
 
     for var, val in zip(variables, value_list):
         expression = re.sub(rf'\b{var}\b', val, expression)
 
+    expression = eval(expression)
     return expression
 
 
@@ -374,7 +372,7 @@ class SetStatement(Statement):
 
             expression = replace_variables(expression, values)
 
-            varbank.redefine(var_name, eval(expression))
+            varbank.redefine(var_name, str(expression))
 
             expression = render_expression(expression_tokens)
 
